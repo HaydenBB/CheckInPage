@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Check-in Stand</title>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<style>
+  body { 
+    font-family: sans-serif; 
+    padding: 20px; 
+    background-color: #f4f4f9; 
+    margin: 0; 
+    min-height: 100vh;
+    /* Use relative path. Ensure Logo.png is in the same folder as index.html */
+    background-image: url('Logo.png');
+    background-repeat: repeat;
+    background-position: center center;
+    background-attachment: fixed;
+    background-size: 200px;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(244, 244, 249, 0.9);
+    z-index: -1;
+  }
+  
+  .container { max-width: 1000px; margin: auto; background: rgba(255, 255, 255, 0.95); padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 18px; }
+  th { background: #333; color: white; padding: 15px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 2px #ccc; text-align: center; }
+  td { padding: 15px; border-bottom: 1px solid #eee; text-align: center; }
+  
+  /* Name column bold */
+  td:nth-child(2) { font-weight: bold; text-align: left; }
+  /* Training Advisor column half strength (grayed) */
+  td:nth-child(5) { color: #777; text-align: left; }
+  /* Social Media check column half size */
+  td:nth-child(4) input { transform: scale(1.5); margin: 0; }
+  
+  /* Standard check-in box size */
+  td:nth-child(3) input { transform: scale(3); margin: 15px; cursor: pointer; }
+  
+  td:nth-child(1) { text-align: left; }
+  
+  .checked-row { background-color: #d4edda !important; }
+  
+  .alpha-nav { position: fixed; right: 10px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; background: white; padding: 5px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 200; }
+  .alpha-nav span { cursor: pointer; padding: 2px 8px; font-weight: bold; color: #333; }
+  .alpha-nav span.disabled { color: #ccc; cursor: not-allowed; }
+  .alpha-nav span:hover:not(.disabled) { background: #28a745; color: white; }
+  
+  .reset-btn { margin-top: 30px; padding: 10px 20px; background: #dc3545; color: white; border: none; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="alpha-nav" id="alphaNav"></div>
+
+<div class="container">
+  <div id="setup-area">
+    <h3>Data Setup</h3>
+    <input type="file" id="upload" accept=".xlsx, .xlsm">
+  </div>
+  <table id="main-table" style="display:none;">
+    <thead>
+      <tr><th>Company Name</th><th>Name</th><th>Check In</th><th>Can we share photos?</th><th>Training Advisor</th></tr>
+    </thead>
+    <tbody id="body"></tbody>
+  </table>
+  <button class="reset-btn" onclick="secureReset()">Reset All Data</button>
+</div>
+
+<script>
+window.onload = () => {
+    const saved = localStorage.getItem('attendeeList');
+    if(saved) renderTable(JSON.parse(saved));
+};
+
+document.getElementById('upload').addEventListener('change', (e) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const wb = XLSX.read(e.target.result, {type: 'array'});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, {header: 1});
+
+        let headIdx = 0;
+        for(let i=0; i<5; i++) {
+            if(JSON.stringify(data[i]).toLowerCase().includes('company')) { headIdx = i; break; }
+        }
+
+        const headers = data[headIdx].map(h => String(h).toLowerCase().replace(/[^a-z]/g, ''));
+        
+        let rows = data.slice(headIdx + 1).map(row => ({
+            company: row[headers.findIndex(h => h.includes('company'))] || '',
+            name: row[headers.findIndex(h => h.includes('bcitograduate') || h.includes('full'))] || '',
+            fb: row[headers.findIndex(h => h.includes('facebook') || h.includes('share'))] ? 'checked' : '',
+            advisor: row[headers.findIndex(h => h.includes('trainingadvisor') || h.includes('advisor') || h.includes('accountowner'))] || '',
+            rsvp: row[headers.findIndex(h => h.includes('rsvp'))] || ''
+        }))
+        .filter(r => r.name && String(r.rsvp).toLowerCase() !== 'no');
+
+        rows.sort((a, b) => a.name.localeCompare(b.name));
+        localStorage.setItem('attendeeList', JSON.stringify(rows));
+        renderTable(rows);
+    };
+    reader.readAsArrayBuffer(e.target.files[0]);
+});
+
+function renderTable(rows) {
+    document.getElementById('setup-area').style.display = 'none';
+    document.getElementById('main-table').style.display = 'table';
+    
+    // Activate screen wake lock
+    requestWakeLock();
+    
+    const presentLetters = new Set(rows.map(r => r.name[0].toUpperCase()));
+    
+    let html = '';
+    rows.forEach((r, i) => {
+        const char = r.name[0].toUpperCase();
+        const isChecked = localStorage.getItem('chk_' + i) === 'true';
+        html += `<tr id="row_${i}" data-char="${char}" class="${isChecked ? 'checked-row' : ''}">
+                 <td>${r.company}</td>
+                 <td>${r.name}</td>
+                 <td><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleRow(this, 'row_${i}', 'chk_${i}')"></td>
+                 <td><input type="checkbox" ${r.fb}></td>
+                 <td>${r.advisor}</td></tr>`;
+    });
+    document.getElementById('body').innerHTML = html;
+    
+    const nav = document.getElementById('alphaNav');
+    nav.innerHTML = '';
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('').forEach(l => {
+        const disabled = presentLetters.has(l) ? '' : 'disabled';
+        nav.innerHTML += `<span class="${disabled}" onclick="scrollToLetter('${l}', '${disabled}')">${l}</span>`;
+    });
+}
+
+function scrollToLetter(l, disabled) {
+    if(disabled) return;
+    const el = document.querySelector(`tr[data-char="${l}"]`);
+    if(el) {
+        const headerOffset = 100;
+        const elementPosition = el.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+        window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+    }
+}
+
+function toggleRow(checkbox, rowId, storageKey) {
+    const row = document.getElementById(rowId);
+    if(checkbox.checked) { row.classList.add('checked-row'); localStorage.setItem(storageKey, 'true'); }
+    else { row.classList.remove('checked-row'); localStorage.setItem(storageKey, 'false'); }
+}
+
+function secureReset() {
+    const password = prompt("Please enter the administrator password to reset all data:");
+    if (password === "reset123") {
+        if (confirm("Are you absolutely sure? This will wipe all check-in data.")) {
+            localStorage.clear();
+            location.reload();
+        }
+    } else if (password !== null) {
+        alert("Incorrect password. Access denied.");
+    }
+}
+
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            await navigator.wakeLock.request('screen');
+            console.log('Wake Lock is active!');
+        }
+    } catch (err) {
+        console.log(`${err.name}, ${err.message}`);
+    }
+}
+</script>
+</body>
+</html>
