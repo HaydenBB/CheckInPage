@@ -206,12 +206,12 @@ document.getElementById('upload').addEventListener('change', (e) => {
 
         const defaults = {
             company: norm.findIndex(h => h.includes('company')),
-            name1:   norm.findIndex(h => h.includes('bcitograduate') || h.includes('full')),
-            name2:   -1,
+            name1:   norm.findIndex(h => h.includes('preferred'),
+            name2:   norm.findIndex(h => h.includes('last'),
             name3:   -1,
-            photos:  norm.findIndex(h => h.includes('facebook') || h.includes('share')),
+            photos:  norm.findIndex(h => h.includes('social'),
             advisor: norm.findIndex(h => h.includes('trainingadvisor') || h.includes('advisor') || h.includes('accountowner')),
-            rsvp:    norm.findIndex(h => h.includes('rsvp'))
+            rsvp:    norm.findIndex(h => h.includes('rsvp') || h.includes('response'))
         };
 
         pending = {buf, file, sheetName, data, range, headIdx, rawHeaders, defaults};
