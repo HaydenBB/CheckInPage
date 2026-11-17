@@ -207,7 +207,7 @@ document.getElementById('upload').addEventListener('change', (e) => {
         const defaults = {
             company: norm.findIndex(h => h.includes('company')),
             name1:   norm.findIndex(h => h.includes('preferred')),
-            name2:   norm.findIndex(h => h.includes('last')),
+            name2:   norm.findIndex(h => h.includes('last name') || h.includes('lastname')),
             name3:   -1,
             photos:  norm.findIndex(h => h.includes('social')),
             advisor: norm.findIndex(h => h.includes('trainingadvisor') || h.includes('advisor') || h.includes('accountowner')),
