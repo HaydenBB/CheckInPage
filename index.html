@@ -41,15 +41,26 @@
   td:nth-child(2) { font-weight: bold; text-align: left; }
   /* Training Advisor column half strength (grayed) */
   td:nth-child(5) { color: #777; text-align: left; }
-  /* Social Media check column half size */
-  td:nth-child(4) input { transform: scale(1.5); margin: 0; }
-
-  /* Standard check-in box size */
-  td:nth-child(3) input { transform: scale(3); margin: 15px; cursor: pointer; }
-
   td:nth-child(1) { text-align: left; }
 
+  /* Three-state check-in button: blank -> tick -> X -> blank */
+  .chk-btn {
+    width: 64px; height: 64px;
+    border: 3px solid #888; border-radius: 10px;
+    background: #fff; cursor: pointer;
+    font-size: 44px; line-height: 1; padding: 0;
+    font-family: sans-serif; font-weight: bold;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chk-btn.tick  { color: #28a745; border-color: #28a745; }
+  .chk-btn.cross { color: #dc3545; border-color: #dc3545; }
+
+  /* Photo permission toggle (icon) */
+  .photo-btn { background: none; border: none; padding: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .photo-btn svg { width: 66px; height: 55px; display: block; }
+
   .checked-row { background-color: #d4edda !important; }
+  .cross-row   { background-color: #f8d7da !important; }
 
   .alpha-nav { position: fixed; right: 10px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; background: white; padding: 5px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 200; }
   .alpha-nav span { cursor: pointer; padding: 2px 8px; font-weight: bold; color: #333; }
@@ -58,12 +69,15 @@
 
   .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 30px; flex-wrap: wrap; }
   .reset-btn { padding: 10px 20px; background: #dc3545; color: white; border: none; cursor: pointer; }
-  .export-btn { padding: 10px 20px; background: #28a745; color: white; border: none; cursor: pointer; }
+  .export-btn { padding: 10px 20px; background: #0d6efd; color: white; border: none; cursor: pointer; }
   .clear-btn { padding: 10px 20px; background: #6c757d; color: white; border: none; cursor: pointer; }
   .no-response td { opacity: 0.45; }
   .nr-btn { padding: 10px 20px; background: #fd7e14; color: white; border: 2px solid #fd7e14; cursor: pointer; }
   .nr-btn.active { background: white; color: #fd7e14; font-weight: bold; }
   .nr-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .rs-btn { padding: 10px 20px; background: #28a745; color: white; border: 2px solid #0d6efd; cursor: pointer; }
+  .rs-btn.active { background: white; color: #0d6efd; font-weight: bold; }
+  .rs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   #stats { margin-left: auto; color: #555; font-size: 14px; }
   #empty-msg { display: none; text-align: center; color: #777; padding: 30px; }
 </style>
@@ -93,8 +107,9 @@
           <span class="label" onclick="sortBy('checked')">Check In <span class="arrow" id="arrow_checked"></span></span>
           <select id="f_checked" onchange="applyView()">
             <option value="">All</option>
-            <option value="in">Checked in</option>
-            <option value="out">Not checked in</option>
+            <option value="tick">Ticked (checked in)</option>
+            <option value="cross">Crossed (X)</option>
+            <option value="none">Not marked yet</option>
           </select>
         </th>
         <th>
@@ -111,6 +126,7 @@
   <div id="empty-msg">No matching attendees.</div>
   <div class="toolbar">
     <button class="clear-btn" onclick="clearFilters()">Clear Search</button>
+    <button class="rs-btn" id="rsBtn" onclick="toggleResponded()">Responded (0)</button>
     <button class="nr-btn" id="nrBtn" onclick="toggleNoResponse()">No response (0)</button>
     <button class="export-btn" onclick="secureExport()">Export to Excel</button>
     <button class="reset-btn" onclick="secureReset()">Reset All Data</button>
@@ -125,12 +141,63 @@ let rows = [];
 let sortKey = 'name';
 let sortDir = 1; // 1 = ascending, -1 = descending
 let noRespOnly = false;
+let respOnly = false;
+
+/* ---------- Photo icons (inline SVG, no image files needed) ---------- */
+
+const CAMERA_BODY = "M80 280H345Q372 280 380 250L420 80Q435 10 500 10H1005Q1070 10 1090 80L1132 250Q1140 280 1165 280H1430Q1493 280 1493 345V1180Q1493 1247 1430 1247H80Q15 1247 15 1180V345Q15 280 80 280Z";
+
+function cameraSvg(bodyColor, lensColor, withCross) {
+    const share =
+        '<g stroke="#fff" stroke-width="48" fill="none">' +
+            '<line x1="602" y1="725" x2="860" y2="592"/>' +
+            '<line x1="602" y1="725" x2="860" y2="860"/>' +
+        '</g>' +
+        '<g fill="#fff">' +
+            '<circle cx="860" cy="592" r="67"/>' +
+            '<circle cx="602" cy="725" r="67"/>' +
+            '<circle cx="860" cy="860" r="67"/>' +
+        '</g>';
+    const cross = withCross
+        ? '<g stroke="#d9272e" stroke-width="115" opacity="0.85">' +
+              '<line x1="255" y1="215" x2="1210" y2="1170"/>' +
+              '<line x1="1210" y1="215" x2="255" y2="1170"/>' +
+          '</g>'
+        : '';
+    return '<svg viewBox="0 0 1508 1257" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<path d="' + CAMERA_BODY + '" fill="' + bodyColor + '"/>' +
+        '<rect x="0" y="458" width="1508" height="65" fill="#fff"/>' +
+        '<circle cx="755" cy="717" r="387" fill="#fff"/>' +
+        '<circle cx="755" cy="720" r="325" fill="' + lensColor + '"/>' +
+        share + cross +
+        '</svg>';
+}
+
+const ICON_OK  = cameraSvg('#1f3c72', '#248dc5', false);
+const ICON_NOT = cameraSvg('#4a4a4a', '#737373', true);
+
+/* ---------- Check-in states ---------- */
+// r.checked is '' (not marked), 'tick' or 'cross'
+
+function normChecked(v) {
+    if (v === true || v === 'tick') return 'tick';
+    if (v === 'cross') return 'cross';
+    return '';
+}
+
+function nextChecked(v) {
+    return v === '' ? 'tick' : (v === 'tick' ? 'cross' : '');
+}
+
+function checkSymbol(v) {
+    return v === 'tick' ? '\u2713' : (v === 'cross' ? '\u2715' : '');
+}
 
 window.onload = () => {
     const saved = localStorage.getItem('attendeeList');
     if (saved) {
         rows = JSON.parse(saved);
-        // Migrate older saves that stored check-ins under chk_<index>
+        // Migrate older saves
         let migrated = false;
         const anyRsvp = rows.some(r => String(r.rsvp === undefined || r.rsvp === null ? '' : r.rsvp).trim() !== '');
         rows.forEach((r, i) => {
@@ -143,6 +210,8 @@ window.onload = () => {
                 r.checked = localStorage.getItem('chk_' + i) === 'true';
                 migrated = true;
             }
+            const n = normChecked(r.checked);
+            if (n !== r.checked) { r.checked = n; migrated = true; }
             if (r.photos === undefined) {
                 r.photos = r.fb === 'checked';
                 migrated = true;
@@ -312,7 +381,7 @@ function importMapped() {
             advisor: cellStr(row, m.advisor),
             rsvp: cellStr(row, m.rsvp),
             noResponse: m.rsvp >= 0 && cellStr(row, m.rsvp) === '',
-            checked: false,
+            checked: '',
             // absolute sheet row index so export can write back to the same row
             sheetRow: p.range.s.r + p.headIdx + 1 + k
         };
@@ -370,11 +439,13 @@ function sortBy(key) {
     applyView();
 }
 
+const CHECK_ORDER = {'': 0, 'tick': 1, 'cross': 2};
+
 function compareRows(a, b) {
     let result = 0;
     if (sortKey === 'checked') {
-        // ascending = not checked in first
-        result = (a.checked ? 1 : 0) - (b.checked ? 1 : 0);
+        // ascending = not marked, then ticked, then X
+        result = CHECK_ORDER[a.checked] - CHECK_ORDER[b.checked];
     } else if (sortKey === 'photos') {
         // ascending = photos allowed first
         result = (b.photos ? 1 : 0) - (a.photos ? 1 : 0);
@@ -383,8 +454,7 @@ function compareRows(a, b) {
     }
     if (result === 0) {
         // tie-break alphabetically by name so lists stay predictable
-        result = String(a.name).localeCompare(String(b.name), undefined, {sensitivity: 'base'}) * (sortKey === 'name' ? 1 : 1);
-        return result;
+        return String(a.name).localeCompare(String(b.name), undefined, {sensitivity: 'base'});
     }
     return result * sortDir;
 }
@@ -399,8 +469,9 @@ function getVisibleRows() {
         String(r.company).toLowerCase().includes(fCompany) &&
         String(r.name).toLowerCase().includes(fName) &&
         String(r.advisor).toLowerCase().includes(fAdvisor) &&
-        (fChecked === '' || (fChecked === 'in' ? r.checked : !r.checked)) &&
-        (!noRespOnly || r.noResponse)
+        (fChecked === '' || (fChecked === 'none' ? r.checked === '' : r.checked === fChecked)) &&
+        (!noRespOnly || r.noResponse) &&
+        (!respOnly || !r.noResponse)
     ).sort(compareRows);
 }
 
@@ -408,6 +479,7 @@ function clearFilters() {
     ['f_company', 'f_name', 'f_advisor'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('f_checked').value = '';
     noRespOnly = false;
+    respOnly = false;
     applyView();
 }
 
@@ -422,11 +494,13 @@ function applyView() {
     let html = '';
     visible.forEach(r => {
         const char = (String(r.name)[0] || '').toUpperCase();
-        html += `<tr id="row_${r.id}" data-char="${esc(char)}" class="${r.checked ? 'checked-row' : ''} ${r.noResponse ? 'no-response' : ''}">
+        const rowClass = (r.checked === 'tick' ? 'checked-row' : (r.checked === 'cross' ? 'cross-row' : '')) +
+                         (r.noResponse ? ' no-response' : '');
+        html += `<tr id="row_${r.id}" data-char="${esc(char)}" class="${rowClass}">
                  <td>${esc(r.company)}</td>
                  <td>${esc(r.name)}</td>
-                 <td><input type="checkbox" ${r.checked ? 'checked' : ''} onchange="toggleRow(this, ${r.id})"></td>
-                 <td><input type="checkbox" ${r.photos ? 'checked' : ''} onchange="togglePhotos(this, ${r.id})"></td>
+                 <td><button type="button" class="chk-btn ${r.checked}" onclick="cycleCheck(this, ${r.id})" aria-label="Check in">${checkSymbol(r.checked)}</button></td>
+                 <td><button type="button" class="photo-btn" onclick="togglePhotos(this, ${r.id})" aria-label="Photo permission" title="${r.photos ? 'OK to share photos' : 'Do not share photos'}">${r.photos ? ICON_OK : ICON_NOT}</button></td>
                  <td>${esc(r.advisor)}</td></tr>`;
     });
     document.getElementById('body').innerHTML = html;
@@ -446,6 +520,13 @@ function applyView() {
 
 function toggleNoResponse() {
     noRespOnly = !noRespOnly;
+    if (noRespOnly) respOnly = false;
+    applyView();
+}
+
+function toggleResponded() {
+    respOnly = !respOnly;
+    if (respOnly) noRespOnly = false;
     applyView();
 }
 
@@ -455,14 +536,21 @@ function updateNrBtn() {
     btn.textContent = (noRespOnly ? 'Showing: ' : '') + 'No response (' + n + ')';
     btn.classList.toggle('active', noRespOnly);
     btn.disabled = (n === 0 && !noRespOnly);
+
+    const rb = document.getElementById('rsBtn');
+    const m = rows.filter(r => !r.noResponse).length;
+    rb.textContent = (respOnly ? 'Showing: ' : '') + 'Responded (' + m + ')';
+    rb.classList.toggle('active', respOnly);
+    rb.disabled = (m === 0 && !respOnly);
 }
 
 function updateStats(shown) {
     updateNrBtn();
-    const done = rows.filter(r => r.checked).length;
+    const done = rows.filter(r => r.checked === 'tick').length;
+    const crossed = rows.filter(r => r.checked === 'cross').length;
     if (shown === undefined) shown = document.querySelectorAll('#body tr').length;
     document.getElementById('stats').textContent =
-        `${done} of ${rows.length} checked in · showing ${shown}`;
+        `${done} of ${rows.length} checked in` + (crossed ? ` · ${crossed} marked X` : '') + ` · showing ${shown}`;
 }
 
 function scrollToLetter(l, disabled) {
@@ -478,21 +566,28 @@ function scrollToLetter(l, disabled) {
 
 /* ---------- Check-in / photos ---------- */
 
-function toggleRow(checkbox, id) {
+function cycleCheck(btn, id) {
     const r = rows.find(x => x.id === id);
     if (!r) return;
-    r.checked = checkbox.checked;
-    // Update the row in place (no re-render) so it doesn't vanish mid-tap under a filter/sort
+    r.checked = nextChecked(r.checked);
+    // Update in place (no re-render) so the row doesn't vanish mid-tap under a filter/sort
+    btn.className = 'chk-btn ' + r.checked;
+    btn.textContent = checkSymbol(r.checked);
     const row = document.getElementById('row_' + id);
-    if (row) row.classList.toggle('checked-row', r.checked);
+    if (row) {
+        row.classList.toggle('checked-row', r.checked === 'tick');
+        row.classList.toggle('cross-row', r.checked === 'cross');
+    }
     saveRows();
     updateStats();
 }
 
-function togglePhotos(checkbox, id) {
+function togglePhotos(btn, id) {
     const r = rows.find(x => x.id === id);
     if (!r) return;
-    r.photos = checkbox.checked;
+    r.photos = !r.photos;
+    btn.innerHTML = r.photos ? ICON_OK : ICON_NOT;
+    btn.title = r.photos ? 'OK to share photos' : 'Do not share photos';
     saveRows();
 }
 
@@ -529,7 +624,13 @@ function exportExcel() {
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         meta.headerRow = 0;
         meta.colCompany = 0; meta.colName = 1; meta.colFb = 2; meta.colAdvisor = 3;
-        rows.forEach((r, i) => { r.sheetRow = i + 1; });
+        rows.forEach((r, i) => {
+            r.sheetRow = i + 1;
+            // fallback sheet has no original data, so write the visible columns too
+            ws[XLSX.utils.encode_cell({r: r.sheetRow, c: 0})] = {t: 's', v: String(r.company)};
+            ws[XLSX.utils.encode_cell({r: r.sheetRow, c: 1})] = {t: 's', v: String(r.name)};
+            ws[XLSX.utils.encode_cell({r: r.sheetRow, c: 3})] = {t: 's', v: String(r.advisor)};
+        });
     }
 
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -564,12 +665,16 @@ function exportExcel() {
         } else {
             ws[photoAddr] = {t: 's', v: 'No'};
         }
-        // checked in field
-        ws[XLSX.utils.encode_cell({r: r.sheetRow, c: colChecked})] = {t: 's', v: r.checked ? 'Yes' : 'No'};
+        // checked in field: tick = Yes, X = No, untouched = blank
+        const chkAddr = XLSX.utils.encode_cell({r: r.sheetRow, c: colChecked});
+        if (r.checked === 'tick') ws[chkAddr] = {t: 's', v: 'Yes'};
+        else if (r.checked === 'cross') ws[chkAddr] = {t: 's', v: 'No'};
+        else delete ws[chkAddr];
     });
 
-    // Expand the sheet range to include any new columns
+    // Expand the sheet range to include any new columns / rows
     range.e.c = Math.max(range.e.c, nextCol - 1, colChecked, colFb);
+    rows.forEach(r => { if (r.sheetRow > range.e.r) range.e.r = r.sheetRow; });
     ws['!ref'] = XLSX.utils.encode_range(range);
 
     const origName = meta.fileName || 'attendees.xlsx';
